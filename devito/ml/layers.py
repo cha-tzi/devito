@@ -643,9 +643,11 @@ class TransConv(Layer):
         return (K, B, R, bias, kernel_grad, output_grad, bias_grad)
 
     def execute(self, input_data, bias, kernel_data=None):
-        map_height = input_data.shape[2] + 2 * self._padding[0]
+        map_height = 2*input_size[2] -1 + 2 * self._transpadding[0]
         batch_size, channels, _, _ = input_data.shape
-
+        #init the zeros
+        out = np.zeros((batch_size, channels, self._z+1)*input_size[2]-1, (self._z+1)*input_size[2]-1))
+        out[...,::self._z+1+1,::self._z+1] = input_data
         for i in range(batch_size):
             for j in range(channels):
                 for k in range(self._padding[0],
