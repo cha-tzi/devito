@@ -536,7 +536,7 @@ class Flat(Layer):
         return [Eq(self._R[b * height * width + c * height + d, a],
                    input_function[a, b, c, d]) for a in range(batch_size)]
 
-# Mathematically, Conv uses a cross-correlation operation.
+# Mathematically, TransConv uses a 
 class TransConv(Layer):
     def __init__(self, kernel_size, input_size,
                  name_allocator_func=alloc, dim_allocator_func=dim_alloc,
@@ -555,13 +555,12 @@ class TransConv(Layer):
         self._kernel_size = (kernel_size[0], input_size[1], kernel_size[1],
                              kernel_size[2])
         self._activation = activation
-
         self._stride = stride
         self._padding = padding
-        # z is the number of zeros to be inserted btw each columns and rows
-        self._z = self._padding - 1
-        # transpad is the number of 0s to be inserted around the image
-        self._transpadding = (self._padding[0] -self._kernel_size[2] - 1, self._padding[1] -self._kernel_size[3] - 1)
+        # z : number of zeros to be inserted btw each cols and rows
+        self._z = self._stride[0] - 1
+        # transpad : number of 0s to be inserted around the image
+        self._transpadding = (self._kernel_size[2] - self._padding[0] - 1, self._kernel_size[3] - self._padding[1] - 1)
 
         super().__init__(self._kernel_size, input_size, name_allocator_func,
                          dim_allocator_func, generate_code)
@@ -614,9 +613,9 @@ class TransConv(Layer):
                      dtype=np.float64)
 
         gridR = Grid(shape=(input_size[0], kernel_size[0],
-                            (input_size[2]- 1) * self._stride[0] //
+                            (input_size[2]- 1) * self._stride[0] \
                             + kernel_height - 2 * self._padding[0],
-                            (input_size[3]- 1) * self._stride[1] //
+                            (input_size[3]- 1) * self._stride[1] \
                             + kernel_width - 2 * self._padding[1]),
                      dimensions=dim_allocator_func(4))
         R = Function(name=name_allocator_func(), grid=gridR, space_order=0,
@@ -643,19 +642,20 @@ class TransConv(Layer):
         return (K, B, R, bias, kernel_grad, output_grad, bias_grad)
 
     def execute(self, input_data, bias, kernel_data=None):
-        map_height = 2*input_size[2] -1 + 2 * self._transpadding[0]
+        map_height = 2*input_data.shape[2] -1 + 2 * self._transpadding[0]
         batch_size, channels, _, _ = input_data.shape
         #init the zeros
-        out = np.zeros((batch_size, channels, self._z+1)*input_size[2]-1, (self._z+1)*input_size[2]-1))
-        out[...,::self._z+1+1,::self._z+1] = input_data
+        out = np.zeros((batch_size, channels, (self._z+1)*input_data.shape[2]-1,
+                        (self._z+1)*input_data.shape[3]-1))
+        out[..., ::self._z+1, ::self._z+1] = input_data
         for i in range(batch_size):
             for j in range(channels):
-                for k in range(self._padding[0],
-                               map_height - self._padding[0]):
+                for k in range(self._transpadding[0],
+                               map_height - self._transpadding[0]):
                     self._I.data[i, j, k] = \
-                        np.concatenate(([0] * self._padding[1],
-                                        input_data[i, j, k - self._padding[0]],
-                                        [0] * self._padding[1]))
+                        np.concatenate(([0] * self._transpadding[1],
+                                        out[i, j, k - self._transpadding[0]],
+                                        [0] * self._transpadding[1]))
 
         if kernel_data is not None:
             self._K.data[:] = kernel_data
@@ -674,10 +674,9 @@ class TransConv(Layer):
         _, _, kernel_height, kernel_width = self._kernel_size
         batch_size, channels, _, _ = input_function.shape
         e, f, g, h = self._K.dimensions
-
+        #stide is always 1 in trans-conv
         rhs = sum([self._K[e, f, x, y] *
-                   input_function[a, f, self._stride[0] * c + x,
-                                  self._stride[1] * d + y]
+                   input_function[a, f, c + x, d + y]
                    for x in range(kernel_height)
                    for y in range(kernel_width)])
 
