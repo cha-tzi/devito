@@ -560,7 +560,8 @@ class TransConv(Layer):
         # z : number of zeros to be inserted btw each cols and rows
         self._z = self._stride[0] - 1
         # transpad : number of 0s to be inserted around the image
-        self._transpadding = (self._kernel_size[2] - self._padding[0] - 1, self._kernel_size[3] - self._padding[1] - 1)
+        self._transpadding = (self._kernel_size[2] - self._padding[0] - 1,
+                              self._kernel_size[3] - self._padding[1] - 1)
 
         super().__init__(self._kernel_size, input_size, name_allocator_func,
                          dim_allocator_func, generate_code)
@@ -656,7 +657,6 @@ class TransConv(Layer):
                         np.concatenate(([0] * self._transpadding[1],
                                         out[i, j, k - self._transpadding[0]],
                                         [0] * self._transpadding[1]))
-
         if kernel_data is not None:
             self._K.data[:] = kernel_data
 
@@ -675,6 +675,7 @@ class TransConv(Layer):
         batch_size, channels, _, _ = input_function.shape
         e, f, g, h = self._K.dimensions
         #stide is always 1 in trans-conv
+        print("shape of I", self._I.shape)
         rhs = sum([self._K[e, f, x, y] *
                    input_function[a, f, c + x, d + y]
                    for x in range(kernel_height)
@@ -688,3 +689,62 @@ class TransConv(Layer):
                           self._activation(self._R[a, e, c, d])))
 
         return eqs
+
+class BatchNorm(Layer):
+    def __init__(self, input_size, eps=1e-05,
+                 name_allocator_func=alloc, dim_allocator_func=dim_alloc,
+                 generate_code=True):
+
+        self._eps = eps
+
+        super().__init__(input_size, self._eps, name_allocator_func,
+                         dim_allocator_func, generate_code)
+
+    def _allocate(self, input_size, name_allocator_func,
+                  dim_allocator_func):
+        
+        a, b, c, d = dim_allocator_func(4)
+        gridB = Grid(shape=(input_size), dimensions = (a, b, c, d) )
+        B = Function(name=name_allocator_func(), grid=gridB, space_order=0,
+                     dtype=np.float64)
+        
+        e, f, g, h = dim_allocator_func(4)
+        gridR = Grid(shape=(input_size), dimensionss=(e, f, g, h))
+
+        R = Function(name=name_allocator_func(), grid=gridR, space_order=0,
+                     dtype=np.float64)
+
+        _, channels, _, _ = input_size
+        gridM = Grid(shape=(channels))
+        M = Function(name=name_allocator_func(), grid=gridM, space_order=0,
+                     dtype=np.float64)
+        
+        gridV = Grid(shape=(channels))
+        V = Function(name=name_allocator_func(), grid=gridV, space_order=0,
+                     dtype=np.float64)
+        return(None, B, R, M, V)
+
+    def execute(self, input_data):
+        images, channels, height, width = input_size
+        means = np.zeros(channels)
+
+        for channel in range(channels):
+            for image in range(images):
+                means[channel] += sum(sum(batch_weights[image][channel]))/(height*width)
+        means /= images
+        M.data[:] = means
+
+        var = np.zeros(channels)
+        for channel in range(channels):
+            for image in range(images):
+                var[channel] += sum(sum(pow(batch_weights[image][channel]-means[channel],2)))/(height*width)
+                    
+        var /= images
+        V.data[:] = var
+        return super().execute()
+
+        def equations(self):
+            a, b, c, d = self._R.dimensions
+            rhs = ((self._B[a, b, c, d]-self._M[b])/(((self._R[b]+self._epsilon)**(0.5))))
+
+            return [Eq(self._R[a, b, c, d], rhs)]
