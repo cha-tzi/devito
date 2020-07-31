@@ -536,7 +536,7 @@ class Flat(Layer):
         return [Eq(self._R[b * height * width + c * height + d, a],
                    input_function[a, b, c, d]) for a in range(batch_size)]
 
-# Mathematically, TransConv uses a 
+# Mathematically, TransConv uses a fractionally-strided convolution
 class TransConv(Layer):
     def __init__(self, kernel_size, input_size,
                  name_allocator_func=alloc, dim_allocator_func=dim_alloc,
@@ -675,7 +675,7 @@ class TransConv(Layer):
         batch_size, channels, _, _ = input_function.shape
         e, f, g, h = self._K.dimensions
         #stide is always 1 in trans-conv
-        print("shape of I", self._I.shape)
+        #print("shape of I", self._I.shape)
         rhs = sum([self._K[e, f, x, y] *
                    input_function[a, f, c + x, d + y]
                    for x in range(kernel_height)
@@ -691,7 +691,7 @@ class TransConv(Layer):
         return eqs
 
 class BatchNorm(Layer):
-    def __init__(self, input_size, eps=1e-05,
+    def __init__(self, kernal_size, input_size, eps=1e-05,
                  name_allocator_func=alloc, dim_allocator_func=dim_alloc,
                  generate_code=True):
 
@@ -700,7 +700,7 @@ class BatchNorm(Layer):
         super().__init__(input_size, self._eps, name_allocator_func,
                          dim_allocator_func, generate_code)
 
-    def _allocate(self, input_size, name_allocator_func,
+    def _allocate(self, kernel_size, input_size, name_allocator_func,
                   dim_allocator_func):
         
         a, b, c, d = dim_allocator_func(4)
@@ -722,7 +722,7 @@ class BatchNorm(Layer):
         gridV = Grid(shape=(channels))
         V = Function(name=name_allocator_func(), grid=gridV, space_order=0,
                      dtype=np.float64)
-        return(None, B, R, M, V)
+        return(None, B, R, M, V, None, None)
 
     def execute(self, input_data):
         images, channels, height, width = input_size
@@ -743,7 +743,7 @@ class BatchNorm(Layer):
         V.data[:] = var
         return super().execute()
 
-        def equations(self):
+        def equations(self, input_function=None):
             a, b, c, d = self._R.dimensions
             rhs = ((self._B[a, b, c, d]-self._M[b])/(((self._R[b]+self._epsilon)**(0.5))))
 
