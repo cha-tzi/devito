@@ -691,7 +691,7 @@ class TransConv(Layer):
         return eqs
 
 class BatchNorm(Layer):
-    def __init__(self, kernal_size, input_size, eps=1e-05,
+    def __init__(self, input_size, eps=1e-05,
                  name_allocator_func=alloc, dim_allocator_func=dim_alloc,
                  generate_code=True):
 
@@ -700,16 +700,17 @@ class BatchNorm(Layer):
         super().__init__(input_size, self._eps, name_allocator_func,
                          dim_allocator_func, generate_code)
 
-    def _allocate(self, kernel_size, input_size, name_allocator_func,
+    def _allocate(self, input_size, eps, name_allocator_func,
                   dim_allocator_func):
         
         a, b, c, d = dim_allocator_func(4)
-        gridB = Grid(shape=(input_size), dimensions = (a, b, c, d) )
-        B = Function(name=name_allocator_func(), grid=gridB, space_order=0,
+        gridI = Grid(shape=(input_size[0], input_size[1], input_size[2], input_size[3]),
+         dimensions=(a, b, c, d))
+        I = Function(name=name_allocator_func(), grid=gridI, space_order=0,
                      dtype=np.float64)
         
         e, f, g, h = dim_allocator_func(4)
-        gridR = Grid(shape=(input_size), dimensionss=(e, f, g, h))
+        gridR = Grid(shape=(input_size), dimensions=(e, f, g, h))
 
         R = Function(name=name_allocator_func(), grid=gridR, space_order=0,
                      dtype=np.float64)
@@ -722,29 +723,29 @@ class BatchNorm(Layer):
         gridV = Grid(shape=(channels))
         V = Function(name=name_allocator_func(), grid=gridV, space_order=0,
                      dtype=np.float64)
-        return(None, B, R, M, V, None, None)
+        return(None, I, R, M, V, None, None)
 
     def execute(self, input_data):
-        images, channels, height, width = input_size
+        images, channels, height, width = input_data.shape
         means = np.zeros(channels)
 
         for channel in range(channels):
             for image in range(images):
-                means[channel] += sum(sum(batch_weights[image][channel]))/(height*width)
+                means[channel] += sum(sum(input_data[image][channel]))/(height*width)
         means /= images
         M.data[:] = means
 
         var = np.zeros(channels)
         for channel in range(channels):
             for image in range(images):
-                var[channel] += sum(sum(pow(batch_weights[image][channel]-means[channel],2)))/(height*width)
+                var[channel] += sum(sum(pow(input_data[image][channel]-means[channel],2)))/(height*width)
                     
         var /= images
         V.data[:] = var
         return super().execute()
 
-        def equations(self, input_function=None):
-            a, b, c, d = self._R.dimensions
-            rhs = ((self._B[a, b, c, d]-self._M[b])/(((self._R[b]+self._epsilon)**(0.5))))
-
-            return [Eq(self._R[a, b, c, d], rhs)]
+    def equations(self, input_function=None):
+        a, b, c, d = self._R.dimensions
+        #rhs = ((self._I[a, b, c, d]-self._M[b])/(((self._R[b]+self._epsilon)**(0.5))))
+        rhs = ((self._I[a, b, c, d]))
+        return [Eq(self._R[a, b, c, d], rhs)]
