@@ -17,12 +17,13 @@ conv1 = ml.Conv(kernel_size=(16, 3, 3),
 
 conv2 = ml.Conv(kernel_size=(16, 3, 3),
                 input_size=(2, 16, 128, 128),
-                padding=(1, 1),
+                #padding=(1, 1),
                 activation=relu,
                 generate_code=False)
 eqs = []
 eqs += conv1.equations(input_function=None)
 eqs += conv2.equations(input_function=conv1.result)
+#data_with_halo
 
 OP = Operator(eqs)
 
@@ -34,11 +35,14 @@ conv2.bias.data[:] = torch.randn((16,))
 
 INPUT_DATA = torch.rand((2, 3, 128, 128))
 conv1.input.data[..., 1:-1, 1:-1] = INPUT_DATA
-print("conv1.input.data", conv1.input.data.shape)
-print("conv2.input.data", conv2.input.data.shape)
-print("conv1.result", conv1.result.shape)
+# print("conv1.input.data", conv1.input.data.shape)
+# print("conv2.input.data", conv2.input.data.shape)
+# print("conv1.result", conv1.result.shape)
 OP.apply()
 print("conv2 shape:", conv2.result.data.shape)
+
+print("conv1.result with pad attept")
+#print(conv1.result.data_with_halo)
 
 
 """
