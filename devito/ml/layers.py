@@ -549,8 +549,8 @@ class TransConv(Layer):
         # (output channels / kernel count, input channels, rows, columns).
         # Input size is expressed as (batch size, channels, rows, columns).
 
-        #self._error_check(kernel_size, input_size, stride, padding,
-        #                  strict_stride_check)
+        self._error_check(kernel_size, input_size, stride, padding,
+                        strict_stride_check)
 
         self._kernel_size = (kernel_size[0], input_size[1], kernel_size[1],
                              kernel_size[2])
@@ -566,36 +566,39 @@ class TransConv(Layer):
         super().__init__(self._kernel_size, input_size, name_allocator_func,
                          dim_allocator_func, generate_code)
 
-    # def _error_check(self, kernel_size, input_size, stride, padding,
-    #                  strict_stride_check):
-    #     if input_size is None or len(input_size) != 4:
-    #         raise Exception("Input size is incorrect")
+    def _error_check(self, kernel_size, input_size, stride, padding,
+                     strict_stride_check):
+        if input_size is None or len(input_size) != 4:
+            raise Exception("Input size is incorrect")
 
-    #     if kernel_size is None or len(kernel_size) != 3:
-    #         raise Exception("Kernel size is incorrect")
+        if kernel_size is None or len(kernel_size) != 3:
+            raise Exception("Kernel size is incorrect")
 
-    #     if stride is None or len(stride) != 2:
-    #         raise Exception("Stride is incorrect")
+        if stride is None or len(stride) != 2:
+            raise Exception("Stride is incorrect")
 
-    #     if stride[0] < 1 or stride[1] < 1:
-    #         raise Exception("Stride cannot be less than 1")
+        if stride[0] < 1 or stride[1] < 1:
+            raise Exception("Stride cannot be less than 1")
 
-    #     if padding is None or len(padding) != 2:
-    #         raise Exception("Padding is incorrect")
+        if padding is None or len(padding) != 2:
+            raise Exception("Padding is incorrect")
 
-    #     if padding[0] < 0 or padding[1] < 0:
-    #         raise Exception("Padding cannot be negative")
+        if padding[0] < 0 or padding[1] < 0:
+            raise Exception("Padding cannot be negative")
 
-    #     if strict_stride_check:
-    #         map_height = input_size[2] + 2 * padding[0]
-    #         map_width = input_size[3] + 2 * padding[1]
-    #         _, kernel_height, kernel_width = kernel_size
+        if strict_stride_check:
+            _, kernel_height, kernel_width = kernel_size
+            transpadding = (kernel_height - padding[0] - 1,
+                            kernel_width - padding[1] - 1)
+            map_height = 2*input_size[2] - 1 + 2 * transpadding[0]
+            map_width = 2*input_size[3] - 1 + 2 * transpadding[1]
+            
 
-    #         if (map_height - kernel_height) % stride[0] != 0 or \
-    #            (map_width - kernel_width) % stride[1] != 0:
-    #             raise Exception("Stride " + str(stride) + " is not "
-    #                             "compatible with feature map, kernel and "
-    #                             "padding sizes")
+            if (map_height - kernel_height) % 1 != 0 or \
+               (map_width - kernel_width) % 1 != 0:
+                raise Exception("Stride " + str(stride) + " is not "
+                                "compatible with feature map, kernel and "
+                                "padding sizes")
 
     def _allocate(self, kernel_size, input_size, name_allocator_func,
                   dim_allocator_func):
