@@ -536,6 +536,285 @@ class Flat(Layer):
         return [Eq(self._R[b * height * width + c * height + d, a],
                    input_function[a, b, c, d]) for a in range(batch_size)]
 
+# convolution with padding of the next layer = 1
+class ConvPad(Layer):
+    def __init__(self, kernel_size, input_size,
+                 name_allocator_func=alloc, dim_allocator_func=dim_alloc,
+                 stride=(1, 1), padding=(0, 0),
+                 activation=None, generate_code=True,
+                 strict_stride_check=True):
+        # Kernel size argument (kernel_size) is expressed as
+        # (output channels / kernel count, rows, columns).
+        # Internal kernel size (self._kernel_size) is expressed as
+        # (output channels / kernel count, input channels, rows, columns).
+        # Input size is expressed as (batch size, channels, rows, columns).
+
+        self._error_check(kernel_size, input_size, stride, padding,
+                          strict_stride_check)
+
+        self._kernel_size = (kernel_size[0], input_size[1], kernel_size[1],
+                             kernel_size[2])
+        self._activation = activation
+
+        self._stride = stride
+        self._padding = padding
+
+        super().__init__(self._kernel_size, input_size, name_allocator_func,
+                         dim_allocator_func, generate_code)
+
+    def _error_check(self, kernel_size, input_size, stride, padding,
+                     strict_stride_check):
+        if input_size is None or len(input_size) != 4:
+            raise Exception("Input size is incorrect")
+
+        if kernel_size is None or len(kernel_size) != 3:
+            raise Exception("Kernel size is incorrect")
+
+        if stride is None or len(stride) != 2:
+            raise Exception("Stride is incorrect")
+
+        if stride[0] < 1 or stride[1] < 1:
+            raise Exception("Stride cannot be less than 1")
+
+        if padding is None or len(padding) != 2:
+            raise Exception("Padding is incorrect")
+
+        if padding[0] < 0 or padding[1] < 0:
+            raise Exception("Padding cannot be negative")
+
+        if strict_stride_check:
+            map_height = input_size[2] + 2 * padding[0]
+            map_width = input_size[3] + 2 * padding[1]
+            _, kernel_height, kernel_width = kernel_size
+
+            if (map_height - kernel_height) % stride[0] != 0 or \
+               (map_width - kernel_width) % stride[1] != 0:
+                raise Exception("Stride " + str(stride) + " is not "
+                                "compatible with feature map, kernel and "
+                                "padding sizes")
+
+    def _allocate(self, kernel_size, input_size, name_allocator_func,
+                  dim_allocator_func):
+        map_height = input_size[2] + 2 * self._padding[0]
+        map_width = input_size[3] + 2 * self._padding[1]
+        _, _, kernel_height, kernel_width = kernel_size
+        PaddingNext = 1
+
+        gridK = Grid(shape=kernel_size, dimensions=dim_allocator_func(4))
+        K = Function(name=name_allocator_func(), grid=gridK, space_order=0,
+                     dtype=np.float64)
+
+        gridB = Grid(shape=(input_size[0], input_size[1],
+                            map_height, map_width),
+                     dimensions=dim_allocator_func(4))
+        B = Function(name=name_allocator_func(), grid=gridB, space_order=0,
+                     dtype=np.float64)
+
+        gridR = Grid(shape=(input_size[0], kernel_size[0],
+                            ((map_height - kernel_height + self._stride[0])
+                            // self._stride[0]) + 2 * PaddingNext,
+                            ((map_width - kernel_width + self._stride[1])
+                            // self._stride[1]) + 2 * PaddingNext),
+                     dimensions=dim_allocator_func(4))
+        R = Function(name=name_allocator_func(), grid=gridR, space_order=0,
+                     dtype=np.float64)
+
+        bias_grid = Grid(shape=kernel_size[0],
+                         dimensions=dim_allocator_func(1))
+        bias = Function(name=name_allocator_func(), grid=bias_grid,
+                        space_order=0, dtype=np.float64)
+
+        kernel_grad = Function(name=name_allocator_func(),
+                               grid=gridK, space_order=0, dtype=np.float64)
+
+        output_grad = Function(name=name_allocator_func(),
+                               grid=Grid(shape=(gridR.shape[1],
+                                                gridR.shape[2],
+                                                gridR.shape[3]),
+                                         dimensions=dim_allocator_func(3)),
+                               space_order=0, dtype=np.float64)
+
+        bias_grad = Function(name=name_allocator_func(),
+                             grid=bias_grid, space_order=0, dtype=np.float64)
+
+        return (K, B, R, bias, kernel_grad, output_grad, bias_grad)
+
+    def execute(self, input_data, bias, kernel_data=None):
+        map_height = input_data.shape[2] + 2 * self._padding[0]
+        batch_size, channels, _, _ = input_data.shape
+
+        for i in range(batch_size):
+            for j in range(channels):
+                for k in range(self._padding[0],
+                               map_height - self._padding[0]):
+                    self._I.data[i, j, k] = \
+                        np.concatenate(([0] * self._padding[1],
+                                        input_data[i, j, k - self._padding[0]],
+                                        [0] * self._padding[1]))
+
+        if kernel_data is not None:
+            self._K.data[:] = kernel_data
+
+        self._bias.data[:] = bias
+
+        self._R.data[:] = 0
+
+        return super().execute()
+
+    def equations(self, input_function=None):
+        if input_function is None:
+            input_function = self._I
+
+        a, b, c, d = self._R.dimensions
+        _, _, kernel_height, kernel_width = self._kernel_size
+        batch_size, channels, _, _ = input_function.shape
+        e, f, g, h = self._K.dimensions
+        PaddingNext = 1
+
+        rhs = sum([self._K[e, f, x, y] *
+                   input_function[a, f, self._stride[0] * c + x,
+                                  self._stride[1] * d + y]
+                   for x in range(kernel_height)
+                   for y in range(kernel_width)])
+
+        eqs = [Inc(self._R[a, e, c+PaddingNext, d+PaddingNext], rhs),
+               Inc(self._R[a, e, c+PaddingNext, d+PaddingNext], self._bias[e])]
+
+        if self._activation is not None:
+            eqs.append(Eq(self._R[a, e, c+PaddingNext, d+PaddingNext],
+                          self._activation(self._R[a, e, c+PaddingNext, d+PaddingNext])))
+
+        return eqs
+
+# subsampling with padding of the next layer = 1
+class SubsamplingPad(Layer):
+    def __init__(self, kernel_size, input_size, function,
+                 name_allocator_func=alloc, dim_allocator_func=dim_alloc,
+                 stride=(1, 1), padding=(0, 0), activation=None,
+                 generate_code=True, strict_stride_check=True):
+        # Kernel size is expressed as (rows, columns).
+        # Input size is expressed as (batch size, channels, rows, columns).
+
+        self._error_check(kernel_size, input_size, stride, padding,
+                          strict_stride_check)
+
+        self._kernel_size = kernel_size
+        self._function = function
+        self._activation = activation
+        self._stride = stride
+        self._padding = padding
+
+        super().__init__(kernel_size, input_size, name_allocator_func,
+                         dim_allocator_func, generate_code)
+
+    def _error_check(self, kernel_size, input_size, stride, padding,
+                     strict_stride_check):
+        if input_size is None or len(input_size) != 4:
+            raise Exception("Input size is incorrect")
+
+        if kernel_size is None or len(kernel_size) != 2:
+            raise Exception("Kernel size is incorrect")
+
+        if stride is None or len(stride) != 2:
+            raise Exception("Stride is incorrect")
+
+        if stride[0] < 1 or stride[1] < 1:
+            raise Exception("Stride cannot be less than 1")
+
+        if padding is None or len(padding) != 2:
+            raise Exception("Padding is incorrect")
+
+        if padding[0] < 0 or padding[1] < 0:
+            raise Exception("Padding cannot be negative")
+
+        if strict_stride_check:
+            map_height = input_size[2] + 2 * padding[0]
+            map_width = input_size[3] + 2 * padding[1]
+            kernel_height, kernel_width = kernel_size
+
+            if (map_height - kernel_height) % stride[0] != 0 or \
+               (map_width - kernel_width) % stride[1] != 0:
+                raise Exception("Stride " + str(stride) + " is not "
+                                "compatible with feature map, kernel and "
+                                "padding sizes")
+
+    def _allocate(self, kernel_size, input_size, name_allocator_func,
+                  dim_allocator_func):
+        map_height = input_size[2] + 2 * self._padding[0]
+        map_width = input_size[3] + 2 * self._padding[1]
+        kernel_height, kernel_width = kernel_size
+        PaddingNext = 1
+
+        a, b, c, d = dim_allocator_func(4)
+        gridB = Grid(shape=(input_size[0], input_size[1], map_height,
+                            map_width),
+                     dimensions=(a, b, c, d))
+        B = Function(name=name_allocator_func(), grid=gridB, space_order=0,
+                     dtype=np.float64)
+
+        e, f, g, h = dim_allocator_func(4)
+        gridR = Grid(shape=(input_size[0], input_size[1],
+                            ((map_height - kernel_height + self._stride[0])
+                            // self._stride[0])  + 2 * PaddingNext,
+                            ((map_width - kernel_width + self._stride[1])
+                            // self._stride[1]) + 2 * PaddingNext),
+                     dimensions=(e, f, g, h))
+
+        R = Function(name=name_allocator_func(), grid=gridR, space_order=0,
+                     dtype=np.float64)
+
+        bias_grid = Grid(shape=input_size[1],
+                         dimensions=dim_allocator_func(1))
+        bias = Function(name=name_allocator_func(), grid=bias_grid,
+                        space_order=0, dtype=np.float64)
+
+        output_grad = Function(name=name_allocator_func(),
+                               grid=Grid(shape=(gridR.shape[1],
+                                                gridR.shape[2],
+                                                gridR.shape[3]),
+                                         dimensions=dim_allocator_func(3)),
+                               space_order=0, dtype=np.float64)
+        bias_grad = Function(name=name_allocator_func(), grid=bias_grid,
+                             space_order=0, dtype=np.float64)
+
+        return (None, B, R, bias, None, output_grad, bias_grad)
+
+    def execute(self, input_data, bias):
+        map_height = input_data.shape[2]
+        # Add padding to the start and end of each row
+        for image in range(input_data.shape[0]):
+            for channel in range(input_data.shape[1]):
+                for i in range(self._padding[0],
+                               map_height - self._padding[0]):
+                    self._I.data[image, channel, i] = \
+                        np.concatenate(([0] * self._padding[1],
+                                        input_data[image, channel,
+                                                   i - self._padding[0]],
+                                        [0] * self._padding[1]))
+        self._bias.data[:] = bias
+        return super().execute()
+
+    def equations(self, input_function=None):
+        if input_function is None:
+            input_function = self._I
+
+        a, b, c, d = self._R.dimensions
+        kernel_height, kernel_width = self._kernel_size
+        PaddingNext = 1
+
+        rhs = self._function([input_function[a, b,
+                                             self._stride[0] * c + i,
+                                             self._stride[1] * d + j]
+                              for i in range(kernel_height)
+                              for j in range(kernel_width)]) + self._bias[b]
+
+        if self._activation is not None:
+            rhs = self._activation(rhs)
+
+        return [Eq(self._R[a, b, c+PaddingNext, d+PaddingNext], rhs)]
+
+
+
 # Mathematically, TransConv uses a fractionally-strided convolution
 class TransConv(Layer):
     def __init__(self, kernel_size, input_size,
