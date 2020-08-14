@@ -145,20 +145,19 @@ class Conv(Layer):
                      dtype=np.float64)
 
         gridB = Grid(shape=(input_size[0], input_size[1],
-                            map_height, map_width),
+                            input_size[2], input_size[3]),
                      dimensions=dim_allocator_func(4))
-        B = Function(name=name_allocator_func(), grid=gridB, space_order=0,
+        B = Function(name=name_allocator_func(), grid=gridB, space_order=(0, 2, 2),
                      dtype=np.float64)
-
         gridR = Grid(shape=(input_size[0], kernel_size[0],
-                            (map_height - kernel_height + self._stride[0])
-                            // self._stride[0],
-                            (map_width - kernel_width + self._stride[1])
-                            // self._stride[1]),
+                            ((map_height - kernel_height)
+                            // self._stride[0]) + 1,
+                            ((map_width - kernel_width)
+                            // self._stride[1]) + 1),
                      dimensions=dim_allocator_func(4))
         R = Function(name=name_allocator_func(), grid=gridR, space_order=0,
                      dtype=np.float64)
-
+        print("R", R.shape)
         bias_grid = Grid(shape=kernel_size[0],
                          dimensions=dim_allocator_func(1))
         bias = Function(name=name_allocator_func(), grid=bias_grid,
