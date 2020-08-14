@@ -208,7 +208,6 @@ class Conv(Layer):
         _, _, kernel_height, kernel_width = self._kernel_size
         batch_size, channels, _, _ = input_function.shape
         e, f, g, h = self._K.dimensions
-
         rhs = sum([self._K[e, f, x, y] *
                    input_function[a, f, self._stride[0] * c + x,
                                   self._stride[1] * d + y]
