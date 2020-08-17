@@ -1,6 +1,8 @@
 from devito.ml import Layer
 from devito.ml import default_name_allocator as alloc
 from devito.ml import default_dim_allocator as dim_alloc
+from devito.ml import single_dim_allocator
+from devito.ml import space_dim_allocator
 from devito import Grid, Function, Constant, Eq, Inc
 from sympy import exp, Max
 import numpy as np
@@ -146,9 +148,12 @@ class Conv(Layer):
 
         gridB = Grid(shape=(input_size[0], input_size[1],
                             input_size[2], input_size[3]),
-                     dimensions=dim_allocator_func(4))
-        B = Function(name=name_allocator_func(), grid=gridB, space_order=(0, 2, 2),
+                     dimensions=(single_dim_allocator(), single_dim_allocator(),
+                     space_dim_allocator(), space_dim_allocator()))
+        B = Function(name=name_allocator_func(), grid=gridB, space_order=1,
                      dtype=np.float64)
+        print("B", B.shape)
+        print("B data", B.data_with_halo.shape)
         gridR = Grid(shape=(input_size[0], kernel_size[0],
                             ((map_height - kernel_height)
                             // self._stride[0]) + 1,
@@ -157,7 +162,6 @@ class Conv(Layer):
                      dimensions=dim_allocator_func(4))
         R = Function(name=name_allocator_func(), grid=gridR, space_order=0,
                      dtype=np.float64)
-        print("R", R.shape)
         bias_grid = Grid(shape=kernel_size[0],
                          dimensions=dim_allocator_func(1))
         bias = Function(name=name_allocator_func(), grid=bias_grid,
@@ -203,7 +207,12 @@ class Conv(Layer):
     def equations(self, input_function=None):
         if input_function is None:
             input_function = self._I
-
+        print("I", self._I.shape)
+        print("I data", self._I.data_with_halo.shape)
+        print("input_function", input_function.shape)
+        print("input_function data", input_function.data_with_halo.shape)
+        print("input type", type(input_function))
+        print("I type", type(self._I))
         a, b, c, d = self._R.dimensions
         _, _, kernel_height, kernel_width = self._kernel_size
         batch_size, channels, _, _ = input_function.shape

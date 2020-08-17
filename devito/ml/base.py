@@ -1,17 +1,15 @@
 from abc import ABC, abstractmethod
-from devito import Operator, Function, dimensions
+from devito import Operator, Function, dimensions, Dimension, SpaceDimension
 from numpy import array
 
 index = 0
 dim_index = 0
-
 
 def default_name_allocator():
     global index
     name = 'f' + str(index)
     index += 1
     return name
-
 
 def default_dim_allocator(count):
     global dim_index
@@ -22,6 +20,21 @@ def default_dim_allocator(count):
     names = names[:-1]
     return dimensions(names)
 
+def single_dim_allocator():
+    global dim_index
+    names = ''
+    names += 'd' + str(dim_index) + ' '
+    dim_index += 1
+    names = names[:-1]
+    return Dimension(names)
+
+def space_dim_allocator():
+    global dim_index
+    names = ''
+    names += 'd' + str(dim_index) + ' '
+    dim_index += 1
+    names = names[:-1]
+    return SpaceDimension(names)
 
 class Layer(ABC):
     def __init__(self, kernel_size,
